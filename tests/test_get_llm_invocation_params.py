@@ -1804,6 +1804,22 @@ class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
         self.assertIsInstance(ctx.exception.__cause__, IndexError)
         self.assertIn("Error mapping context messages to provider format", str(ctx.exception))
 
+    def test_conversation_opening_with_assistant_starts_with_user(self):
+        """Test that a bot-first conversation (e.g. a greeting) begins with a user turn."""
+        context = LLMContext(
+            messages=[
+                {"role": "system", "content": "You are Maya."},
+                {"role": "assistant", "content": "Hi, is this Ahmed?"},
+                {"role": "user", "content": "Yes, speaking."},
+            ]
+        )
+
+        messages = self.adapter.get_llm_invocation_params(context)["messages"]
+
+        self.assertEqual([m["role"] for m in messages], ["user", "assistant", "user"])
+        self.assertEqual(messages[0]["content"], [{"text": "."}])
+        self.assertEqual(messages[1]["content"][0]["text"], "Hi, is this Ahmed?")
+
     def test_standard_messages_converted_to_aws_bedrock_format(self):
         """Test that LLMStandardMessage objects are converted to AWS Bedrock format."""
         # Create standard messages

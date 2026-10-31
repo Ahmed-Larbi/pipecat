@@ -153,6 +153,11 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
             if message["role"] in ("system", "developer"):
                 message["role"] = "user"
 
+        # The Converse API rejects conversations that open with an assistant
+        # turn, which happens when the bot speaks first (e.g. a greeting).
+        if messages and messages[0]["role"] == "assistant":
+            messages.insert(0, {"role": "user", "content": [{"text": "."}]})
+
         # Merge consecutive messages with the same role.
         i = 0
         while i < len(messages) - 1:
