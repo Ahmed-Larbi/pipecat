@@ -49,6 +49,10 @@ except ModuleNotFoundError as e:
     logger.error('In order to use Deepgram, you need to `uv add "pipecat-ai[deepgram]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
+# Longest a single websocket write may take before the connection is treated
+# as dead and replaced.
+SEND_AUDIO_TIMEOUT_SECS = 2.0
+
 
 @deprecated(
     "`LiveOptions` is deprecated since 0.0.105 and will be removed in 2.0.0. Use "
@@ -559,13 +563,32 @@ class DeepgramSTTService(STTService):
         Yields:
             Frame: None (transcription results come via WebSocket callbacks).
         """
-        if self._connection:
+        connection = self._connection
+        if connection:
             try:
-                await self._connection.send_media(audio)
+                # A stalled socket would otherwise block this send, and with it
+                # every frame queued behind the STT processor.
+                await asyncio.wait_for(
+                    connection.send_media(audio), timeout=SEND_AUDIO_TIMEOUT_SECS
+                )
             except Exception as e:
-                logger.warning(f"{self}: send_media failed, connection will reconnect: {e}")
-                self._connection = None
+                logger.warning(f"{self}: send_media failed, reconnecting: {e!r}")
+                self._force_reconnect(connection)
         yield None
+
+    def _force_reconnect(self, connection) -> None:
+        """Drop a dead connection so ``_connection_handler`` reconnects.
+
+        Aborting the socket ends ``start_listening()``, which returns control
+        to the retry loop. Without this, a half-open socket keeps the handler
+        waiting on it indefinitely.
+        """
+        if self._connection is connection:
+            self._connection = None
+        websocket = getattr(connection, "_websocket", None)
+        transport = getattr(websocket, "transport", None)
+        if transport is not None:
+            transport.abort()
 
     def _build_connect_kwargs(self) -> dict:
         """Build keyword arguments for ``client.listen.v1.connect()`` from current settings."""
@@ -723,12 +746,17 @@ class DeepgramSTTService(STTService):
         """
         while True:
             await asyncio.sleep(5)
-            if self._connection:
+            connection = self._connection
+            if connection:
                 try:
-                    await self._connection.send_keep_alive(ListenV1KeepAlive(type="KeepAlive"))
+                    await asyncio.wait_for(
+                        connection.send_keep_alive(ListenV1KeepAlive(type="KeepAlive")),
+                        timeout=SEND_AUDIO_TIMEOUT_SECS,
+                    )
                     logger.trace(f"{self}: Sent keepalive")
                 except Exception as e:
-                    logger.warning(f"{self}: Keepalive failed: {e}")
+                    logger.warning(f"{self}: Keepalive failed, reconnecting: {e!r}")
+                    self._force_reconnect(connection)
 
     async def _on_error(self, error):
         logger.warning(f"{self} connection error, will retry: {error}")
