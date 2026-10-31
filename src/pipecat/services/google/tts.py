@@ -722,8 +722,9 @@ class GoogleHttpTTSService(TTSService):
         if not creds:
             raise ValueError("No valid credentials provided.")
 
+        # The global endpoint has no regional prefix (texttospeech.googleapis.com).
         client_options = None
-        if self._location:
+        if self._location and self._location != "global":
             client_options = ClientOptions(
                 api_endpoint=f"{self._location}-texttospeech.googleapis.com"
             )
@@ -931,8 +932,9 @@ class GoogleBaseTTSService(TTSService):
         if not creds:
             raise ValueError("No valid credentials provided.")
 
+        # The global endpoint has no regional prefix (texttospeech.googleapis.com).
         client_options = None
-        if self._location:
+        if self._location and self._location != "global":
             client_options = ClientOptions(
                 api_endpoint=f"{self._location}-texttospeech.googleapis.com"
             )
